@@ -1,19 +1,18 @@
-use emailnewsletter::run;
+use std::net::TcpListener;
+
+use emailnewsletter::{run, configuration::get_configuration};
+use sqlx::PgConnection;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    run()?.await
-}
 
+    let configuration = get_configuration().expect("Failed to read configuratin");
+    let connection = PgConnection::connect(&configuration.database.connection_string())
+        .await
+        .expect("Failed to connect to Postgres.");
 
-#[cfg(tests)]
-mod tests {
-    use crate::health_check;
+    let address = format!("127.0.0.1:{}", configuration.application_port);
+    let listener: TcpListener = TcpListener::bind(address).expect("Failed to bind port");
 
-    #[tokio::test]
-    async fn health_check_succeeded() {
-        let response = health_check().await;
-
-        assert!(response.status().is_success());
-    }
+    run(listener, connection)?.await
 }

@@ -1,17 +1,25 @@
-use actix_web::{HttpServer, Responder, web, App, HttpResponse, dev::Server};
+use std::net::TcpListener;
 
-async fn health_check() -> impl Responder {
-    // todo!()
-    HttpResponse::Ok()   
- }
- 
- pub fn run() -> Result<Server, std::io::Error> {
-     let server = HttpServer::new(|| {
+use actix_web::{HttpServer, Responder, web, App, HttpResponse, dev::Server};
+use sqlx::PgConnection;
+
+pub mod configuration;
+pub mod routes;
+pub mod startup;
+
+pub fn run(listener: TcpListener, connection: PgConnection) -> Result<Server, std::io::Error> {
+    //smart pointer
+    //shared mutable state by all workers
+    let connection = web::Data::new(connection);
+
+     let server = HttpServer::new(move || {
          App::new()
-             .route("/health-check", web::get().to(health_check))
+             .route("/health-check", web::get().to(routes::health_check))
+             .route("/subscriptions", web::post().to(routes::subscribe))
+             .app_data(connection.clone())
      })
-     .bind("127.0.0.1:8000")?
+     .listen(listener)?
      .run();
 
      Ok(server)
- }
+}
