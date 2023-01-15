@@ -1,20 +1,26 @@
 use std::net::TcpListener;
 
-use emailnewsletter::{run, configuration::{self, get_configuration}};
-use sqlx::{PgConnection, Connection};
+use emailnewsletter::{
+    configuration::{self, get_configuration},
+    telemetry::{get_subscriber, init_subscriber},
+};
+use once_cell::sync::Lazy;
+use reqwest::get;
+use secrecy::ExposeSecret;
+use sqlx::{Connection, PgConnection, PgPool};
 
 #[tokio::test]
 async fn health_check_works() {
-    let address = spawn_app();
+    let app = spawn_app().await;
 
     let client = reqwest::Client::new();
     //Act
     let response = client
-        .get(format!("{}/health-check", &address))
+        .get(format!("{}/health-check", &app.address))
         .send()
         .await
         .expect("Failed to execute request");
-        
+
     //Assert
     assert!(response.status().is_success());
     assert_eq!(Some(0), response.content_length());
@@ -23,20 +29,20 @@ async fn health_check_works() {
 #[tokio::test]
 async fn subscribe_returns_a_200_for_valid_form_data() {
     //Arrange
-    let address = spawn_app();
+    let app = spawn_app().await;
     let client = reqwest::Client::new();
     let configuration = get_configuration().expect("Failed to read configuration");
     let connection_string = configuration.database.connection_string();
 
     //Connection trait to scope.
-    let connection = PgConnection::connect(&connection_string)
+    let connection = PgConnection::connect(&connection_string.expose_secret())
         .await
         .expect("Failed to connect to Postgres.");
-    
+
     //Act
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
     let response = client
-        .post(&format!("{}/subscriptions", &address))
+        .post(&format!("{}/subscriptions", &app.address))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body)
         .send()
@@ -45,42 +51,97 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
 
     //Assert
     assert_eq!(200, response.status().as_u16());
-    
-    connection.begin();
+    let saved = sqlx::query!("SELECT email, name FROM subscriptions",)
+        .fetch_one(&app.db_pool)
+        .await
+        .expect("Failed to fetch saved subscriptions");
+
+    assert_eq!(saved.email, "ursulale_guin@gmail.com");
+    assert_eq!(saved.name, "le guin");
 }
 
 #[tokio::test]
 async fn subscribe_returns_a_400_when_data_is_missing() {
-     //Arrange
-     let address = spawn_app();
-     let client = reqwest::Client::new();
-     let test_cases = vec![
+    //Arrange
+    let app = spawn_app().await;
+    let client = reqwest::Client::new();
+    let test_cases = vec![
         ("name=le%20guin", "missing the email"),
         ("email=ursula_le_guin%40gmail.com", "missing the name"),
-        ("", "missing both name and the email")
-     ];
+        ("", "missing both name and the email"),
+    ];
 
-     for (invalid_body, error_message) in test_cases {
+    for (invalid_body, error_message) in test_cases {
         //Act
         let response = client
-        .post(&format!("{}/subscriptions", &address))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(invalid_body)
-        .send()
-        .await
-        .expect("Failed to execute request");
+            .post(&format!("{}/subscriptions", &app.address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(invalid_body)
+            .send()
+            .await
+            .expect("Failed to execute request");
 
         //Assert
-        assert_eq!(400, response.status().as_u16(), "The API did not fail with bad request when the payload was {}.", error_message);
-     }
+        assert_eq!(
+            400,
+            response.status().as_u16(),
+            "The API did not fail with bad request when the payload was {}.",
+            error_message
+        );
+    }
 }
-fn spawn_app() -> String {
+
+static TRACING: Lazy<()> = Lazy::new(|| {
+    let default_filter_level = "info".to_string();
+    let subscriber_name = "test".to_string();
+
+    if std::env::var("TEST_LOG").is_ok() {
+        let subscriber = get_subscriber(subscriber_name, default_filter_level, std::io::stdout);
+        init_subscriber(subscriber);
+    } else {
+        let subscriber = get_subscriber("test".into(), "debug".into(), std::io::sink);
+        init_subscriber(subscriber);
+    };
+});
+
+pub struct TestApp {
+    pub address: String,
+    pub db_pool: PgPool,
+}
+
+//The init trace subscriber will be called for all our tests and it must be called once.
+//Using crate::once_cell
+async fn spawn_app() -> TestApp {
+    Lazy::force(&TRACING);
+
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
-    
     let port = listener.local_addr().unwrap().port();
-    let server = emailnewsletter::run(listener).expect("failed to bind address");
+
+    let configuration = get_configuration().expect("Failed to read configuration");
+    let connection_pool =
+        PgPool::connect(&configuration.database.connection_string().expose_secret())
+            .await
+            .expect("Failed to connect to Postgres");
 
     //background task
+    let server = emailnewsletter::startup::run(listener, connection_pool.clone())
+        .expect("failed to bind address");
     let _ = tokio::spawn(server);
-    format!("http://127.0.0.1:{}", port)    
+    let address = format!("http://127.0.0.1:{}", port);
+    TestApp {
+        address,
+        db_pool: connection_pool,
+    }
+}
+
+pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
+    let mut connection =
+        PgConnection::connect(&config.connection_string_without_db().expose_secret())
+            .await
+            .expect("Failed to connect to Postgres");
+    // [...]
+    let connection_pool = PgPool::connect(&config.connection_string().expose_secret())
+        .await
+        .expect("Failed to connect to Postgres.");
+    // [...]
 }
