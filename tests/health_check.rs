@@ -1,9 +1,10 @@
 use std::net::TcpListener;
 
 use emailnewsletter::{
-    configuration::{self, get_configuration},
+    configuration::{self, get_configuration, DatabaseSettings},
     telemetry::{get_subscriber, init_subscriber},
 };
+
 use once_cell::sync::Lazy;
 use reqwest::get;
 use secrecy::ExposeSecret;
@@ -144,4 +145,6 @@ pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .await
         .expect("Failed to connect to Postgres.");
     // [...]
+
+    return connection_pool;
 }

@@ -46,3 +46,31 @@ UNIQUE añade un B-Tree index en la columna asociada.
 ### App state en actix-web
 
 Para persistir el estado de la aplicación, como la base de datos, utilizamos app-data para desvincularnos del ciclo de vida de una petición.
+
+PgConnection no es clonable. Para solucionarlo utilizamos Atomic Reference Counted pointer, Arc:
+web::Data de actix-web es un extractor que envuelve PgConnction en un Arc.
+
+sqlx es una interfaz asíncrona, no permite ejecutar diferentes consultas concurrentemente sobre la misma conexión. Requieren de una conexión mutable (única)
+PgPool - referencia compartida.
+
+
+### Observability, tracing
+
+tracing:
+- span
+
+### CI/CD
+
+DigitalOcean App Container
+- Como sqlx evalúa en tiempo de compilación no podemso construir con _docker build_ fácilmente.
+- Añadimos la _feature_ _offline_
+
+_sqlx prepare_ guarda las metadatos de las consultas en un fichero.
+# It must be invoked as a cargo subcommand
+# All options after `--` are passed to cargo itself
+# We need to point it at our library since it contains
+# all our SQL queries.
+cargo sqlx prepare -- --lib
+
+
+
