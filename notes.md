@@ -73,4 +73,13 @@ _sqlx prepare_ guarda las metadatos de las consultas en un fichero.
 cargo sqlx prepare -- --lib
 
 
+Mejorar imágenes de Docker:
+- Layer caching
+- Orden de operaciones (multi-etapa)
 
+Chef (como los requirements de Python) + Cargo.lock
+
+##
+
+Las variables de entorno se procesan todas como String, por lo cual los _int_ no se leerán correctamente. 
+Utilizamos el crate  _serde-aux_ 

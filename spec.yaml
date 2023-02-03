@@ -32,3 +32,25 @@ services:
   # All incoming requests should be routed to our app
    routes:
    - path: /
+   envs:
+   - key: APP_DATABASE__USERNAME
+     scope: RUN_TIME
+     value: ${newsletterdb.USERNAME}
+   - key: APP_DATABASE__PASSWORD
+     scope: RUN_TIME
+     value: ${newsletterdb.PASSWORD}
+   - key: APP_DATABASE__HOST
+     scope: RUN_TIME
+     value: ${newsletterdb.HOSTNAME}
+   - key: APP_DATABASE__PORT
+     scope: RUN_TIME
+     value: ${newsletterdb.PORT}
+   - key: APP_DATABASE__DATABASE_NAME
+     scope: RUN_TIME
+     value: ${newsletterdb.DATABASE}
+databases:
+ - engine: PG
+   name: newsletterdb
+   num_nodes: 1
+   size: db-s-dev-database
+   version: "12"
