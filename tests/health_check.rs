@@ -33,10 +33,9 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
     let app = spawn_app().await;
     let client = reqwest::Client::new();
     let configuration = get_configuration().expect("Failed to read configuration");
-    let connection_string = configuration.database.connection_string();
 
     //Connection trait to scope.
-    let connection = PgConnection::connect(&connection_string.expose_secret())
+    let connection = PgConnection::connect_with(&configuration.database.with_db())
         .await
         .expect("Failed to connect to Postgres.");
 
@@ -57,7 +56,7 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
         .await
         .expect("Failed to fetch saved subscriptions");
 
-    assert_eq!(saved.email, "ursulale_guin@gmail.com");
+    assert_eq!(saved.email, "ursula_le_guin@gmail.com");
     assert_eq!(saved.name, "le guin");
 }
 
@@ -119,10 +118,9 @@ async fn spawn_app() -> TestApp {
     let port = listener.local_addr().unwrap().port();
 
     let configuration = get_configuration().expect("Failed to read configuration");
-    let connection_pool =
-        PgPool::connect(&configuration.database.connection_string().expose_secret())
-            .await
-            .expect("Failed to connect to Postgres");
+    let connection_pool = PgPool::connect_with(configuration.database.with_db())
+        .await
+        .expect("Failed to connect to Postgres");
 
     //background task
     let server = emailnewsletter::startup::run(listener, connection_pool.clone())
@@ -141,15 +139,17 @@ pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .expect("Failed to connect to Postgres");
 
     connection
-        .execute(format!(r"#CREATE_DATABASE "{}";"#, config.database_name).as_str())
+        .execute(format!(r#"CREATE_DATABASE "{}";"#, config.database_name).as_str())
         .await
         .expect("Failed to create database.");
 
-    // [...]
-    let connection_pool = PgPool::connect(&config.connection_string().expose_secret())
+    // Migrate database
+    let connection_pool = PgPool::connect_with(config.with_db())
         .await
         .expect("Failed to connect to Postgres.");
-    // [...]
-
-    return connection_pool;
+    sqlx::migrate!("./migrations")
+        .run(&connection_pool)
+        .await
+        .expect("Failed to migrate the database");
+    connection_pool
 }
